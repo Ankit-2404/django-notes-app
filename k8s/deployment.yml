@@ -1,0 +1,79 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: notes-app-deployment
+  namespace: notes-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notes-app
+  template:
+    metadata:
+      name: notes-app-pod
+      labels:
+        app: notes-app
+    spec:
+      initContainers:
+        - name: wait-for-database
+          image: mysql:8.0
+          command:
+            - sh
+            - -c
+            - until mysql -h notes-app-db -u"$DB_USER" "$DB_NAME" -e 'SELECT 1' >/dev/null 2>&1; do echo "Waiting for database"; sleep 2; done
+          env:
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: notes-app-db-credentials
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: notes-app-db-credentials
+                  key: DB_USER
+            - name: MYSQL_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: notes-app-db-credentials
+                  key: DB_PASSWORD
+      containers:
+        - name: notes-app-container
+          image: ankit2404/notes-app-k8s
+          command:
+            - sh
+            - -c
+            - python manage.py migrate --noinput && exec gunicorn notesapp.wsgi --bind 0.0.0.0:8000
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: notes-app-db-credentials
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: notes-app-db-credentials
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: notes-app-db-credentials
+                  key: DB_PASSWORD
+            - name: DB_HOST
+              value: notes-app-db
+            - name: DB_PORT
+              value: "3306"
+          startupProbe:
+            tcpSocket:
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /admin/login/
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 6
